@@ -1,0 +1,331 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Lluvia — Caminos de Agua</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #fff; color: #1a1a1a; padding: 1.5rem; max-width: 900px; margin: 0 auto; }
+h1 { font-size: 18px; font-weight: 500; color: #253489; margin-bottom: 1.5rem; }
+.stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 10px; margin-bottom: 1.5rem; }
+.stat-card { background: #f5f5f3; border-radius: 8px; padding: .85rem 1rem; }
+.stat-label { font-size: 12px; color: #666; margin-bottom: 4px; }
+.stat-val { font-size: 22px; font-weight: 500; color: #1a1a1a; }
+.stat-sub { font-size: 11px; color: #999; margin-top: 2px; }
+.badge-above { font-size: 10px; padding: 2px 6px; border-radius: 10px; background: #E1F5EE; color: #085041; margin-left: 6px; vertical-align: middle; }
+.badge-below { font-size: 10px; padding: 2px 6px; border-radius: 10px; background: #FAECE7; color: #4A1B0C; margin-left: 6px; vertical-align: middle; }
+.sec-head { font-size: 12px; font-weight: 500; color: #666; text-transform: uppercase; letter-spacing: .05em; margin: 1.5rem 0 .6rem; }
+.yr-tabs { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: .75rem; }
+.yr-tab { background: none; border: 1px solid #ddd; border-radius: 8px; padding: 4px 14px; font-size: 12px; cursor: pointer; color: #555; font-family: inherit; }
+.yr-tab:hover { background: #f0f0ee; }
+.yr-tab.on { background: #E1F5EE; border-color: #9FE1CB; color: #085041; font-weight: 500; }
+.view-toggle { display: flex; gap: 6px; margin-bottom: .75rem; }
+.view-btn { background: none; border: 1px solid #ddd; border-radius: 8px; padding: 4px 14px; font-size: 12px; cursor: pointer; color: #555; font-family: inherit; }
+.view-btn:hover { background: #f0f0ee; }
+.view-btn.on { background: #E6F1FB; border-color: #85B7EB; color: #0C447C; font-weight: 500; }
+/* Checkbox toggles for bar chart */
+.check-row { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 10px; }
+.check-pill { display: flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 20px; border: 1.5px solid #ddd; cursor: pointer; font-size: 12px; color: #555; user-select: none; transition: opacity .15s; }
+.check-pill.off { opacity: .35; }
+.check-pill .dot { width: 10px; height: 10px; border-radius: 2px; flex-shrink: 0; }
+.loading { color: #666; font-size: 14px; padding: 3rem 0; text-align: center; }
+.error { color: #c0392b; font-size: 13px; padding: 2rem 0; text-align: center; line-height: 1.6; }
+.updated { font-size: 11px; color: #aaa; margin-top: 1.25rem; text-align: right; }
+canvas { display: block !important; }
+</style>
+</head>
+<body>
+
+<h1>Monitoreo de lluvia &mdash; San Miguel de Allende, Oficina Caminos de Agua</h1>
+<div id="loading" class="loading">Cargando datos&hellip;</div>
+<div id="err" class="error" style="display:none"></div>
+<div id="dash" style="display:none">
+  <div class="stat-grid" id="stats"></div>
+
+  <!-- CUMULATIVE CHART (top) -->
+  <div class="sec-head">Precipitación acumulada — año en curso</div>
+  <div style="display:flex;align-items:center;gap:16px;flex-wrap:wrap;margin-bottom:.75rem">
+    <div class="view-toggle">
+      <button class="view-btn on" id="btn-single">Un año</button>
+      <button class="view-btn" id="btn-all">Todos los años</button>
+    </div>
+    <div class="yr-tabs" id="yr-tabs"></div>
+  </div>
+  <div class="legend" id="cum-leg" style="display:flex;flex-wrap:wrap;gap:12px;margin-bottom:8px;font-size:12px;color:#555"></div>
+  <div id="cum-wrap" style="position:relative;width:100%;height:260px;min-height:260px;overflow:hidden">
+    <canvas id="cumC" width="800" height="260" style="width:100%!important;height:260px!important;min-height:260px"></canvas>
+  </div>
+
+  <!-- BAR CHART (bottom) with toggles -->
+  <div class="sec-head" style="margin-top:1.5rem">Precipitación mensual (mm)</div>
+  <div class="check-row" id="bar-checks"></div>
+  <div id="bar-wrap" style="position:relative;width:100%;height:270px;min-height:270px;overflow:hidden">
+    <canvas id="barC" width="800" height="270" style="width:100%!important;height:270px!important;min-height:270px"></canvas>
+  </div>
+
+  <div class="updated" id="updated"></div>
+</div>
+
+<script>
+const API = 'https://script.google.com/macros/s/AKfycbzlw2RcgidvpR-yWg4I8hqL9DHmnST1vRYMsZbWK2IeDjNcHscigN1LLcC5axgfFF-Eqw/exec';
+
+const MONTHS  = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
+const MON_S   = ['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic'];
+const HIST_MON = [14, 12.9, 12.3, 12.9, 41.2, 114.4, 146.3, 103.5, 116.9, 44.2, 16.2, 5];
+const HIST_TOTAL = 639.8;
+const WEEK_TO_MON = [4,8,13,17,22,26,30,35,39,44,48,53];
+
+const C = {
+  hist: { fill:'#B4B2A9', line:'#5F5E5A' },
+  2023: { fill:'#85B7EB', line:'#185FA5' },
+  2024: { fill:'#F0997B', line:'#993C1D' },
+  2025: { fill:'#AFA9EC', line:'#534AB7' },
+  2026: { fill:'#5DCAA5', line:'#0F6E56' },
+};
+const col = yr => C[yr] || C[2026];
+
+function aggregate(rows) {
+  const monthly = {}, weekly = {};
+  for (const r of rows) {
+    const yr = parseInt(r[2]);
+    const mn = parseInt(r[3]);
+    const wk = parseInt(r[5]);
+    const mm = parseFloat(r[8]);
+    if (!yr || yr < 2023 || yr > 2030) continue;
+    if (!mn || mn < 1 || mn > 12) continue;
+    if (isNaN(mm) || mm < 0) continue;
+    if (!monthly[yr]) monthly[yr] = new Array(12).fill(0);
+    monthly[yr][mn-1] += mm;
+    if (wk >= 1 && wk <= 53) {
+      if (!weekly[yr]) weekly[yr] = new Array(53).fill(0);
+      weekly[yr][wk-1] += mm;
+    }
+  }
+  for (const y in monthly) monthly[y] = monthly[y].map(v => parseFloat(v.toFixed(1)));
+  return { monthly, weekly };
+}
+
+function cumMon(weekArr, cutoffMonth) {
+  // cutoffMonth: 1-12, if provided null out months beyond it
+  return WEEK_TO_MON.map((cut, i) => {
+    if (cutoffMonth !== undefined && i >= cutoffMonth) return null;
+    return parseFloat(weekArr.slice(0, cut).reduce((a,b) => a+b, 0).toFixed(1));
+  });
+}
+function cumArr(arr) {
+  let s = 0; return arr.map(v => { s += v; return parseFloat(s.toFixed(1)); });
+}
+
+let barInst = null, cumInst = null, weeklyData = {}, monthlyData = {};
+let cumView = 'single', activeYr = 2026;
+let barVisible = {}; // tracks which datasets are visible in bar chart
+
+function buildStats(monthly, nowMon, nowYr) {
+  const d = monthly[nowYr] || new Array(12).fill(0);
+  const ytd = d.slice(0, nowMon).reduce((a,b) => a+b, 0);
+  const avgYtd = HIST_MON.slice(0, nowMon).reduce((a,b) => a+b, 0);
+  const pct = avgYtd > 0 ? Math.round((ytd / avgYtd) * 100) : 0;
+  const curMon = d[nowMon-1] || 0;
+  const prevYrs = Object.keys(monthly).map(Number).filter(y => y < nowYr);
+  const lastFull = prevYrs.length ? Math.max(...prevYrs) : nowYr - 1;
+  const lastTotal = (monthly[lastFull] || []).reduce((a,b) => a+b, 0);
+  const badge = pct >= 100
+    ? `<span class="badge-above">+${pct-100}% vs prom.</span>`
+    : `<span class="badge-below">${pct}% del prom.</span>`;
+  document.getElementById('stats').innerHTML = [
+    { l:`${nowYr} acumulado`, v:`${ytd.toFixed(0)} mm`, extra:badge, raw:true },
+    { l:`${MONTHS[nowMon-1]} ${nowYr}`, v:`${curMon.toFixed(1)} mm`, s:`Promedio mensual: ${HIST_MON[nowMon-1]} mm` },
+    { l:`${lastFull} total`, v:`${lastTotal.toFixed(0)} mm`, s:`Promedio anual: ${HIST_TOTAL} mm` },
+    { l:'Promedio histórico', v:`${HIST_TOTAL} mm`, s:'Estaciones SMN 1990–2019' },
+  ].map(c => `
+    <div class="stat-card">
+      <div class="stat-label">${c.l}</div>
+      <div class="stat-val">${c.v}${c.raw ? c.extra : ''}</div>
+      ${!c.raw ? `<div class="stat-sub">${c.s}</div>` : ''}
+    </div>`).join('');
+}
+
+function buildBarChecks(years, nowYr) {
+  const container = document.getElementById('bar-checks');
+  container.innerHTML = '';
+
+  // Default: current year and historical average visible, others off
+  barVisible = { hist: true };
+  years.forEach(yr => { barVisible[yr] = (yr === nowYr); });
+
+  const items = [{ key:'hist', label:'Historical avg.', c:C.hist }, ...years.map(yr => ({ key:yr, label:String(yr), c:col(yr) }))];
+
+  items.forEach(item => {
+    const pill = document.createElement('div');
+    pill.className = 'check-pill' + (barVisible[item.key] ? '' : ' off');
+    pill.innerHTML = `<span class="dot" style="background:${item.c.line}"></span>${item.label}`;
+    pill.onclick = () => {
+      barVisible[item.key] = !barVisible[item.key];
+      pill.classList.toggle('off', !barVisible[item.key]);
+      updateBarVisibility();
+    };
+    container.appendChild(pill);
+  });
+}
+
+function updateBarVisibility() {
+  if (!barInst) return;
+  barInst.data.datasets.forEach((ds, i) => {
+    const key = i === 0 ? 'hist' : parseInt(ds.label);
+    ds.hidden = !barVisible[key];
+  });
+  barInst.update();
+}
+
+function buildBar(monthly, nowMon, nowYr) {
+  const years = Object.keys(monthly).map(Number).sort();
+  buildBarChecks(years, nowYr);
+
+  const datasets = [{
+    label: 'Promedio histórico',
+    data: HIST_MON,
+    backgroundColor: C.hist.fill + '88',
+    borderColor: C.hist.line,
+    borderWidth: 1,
+    hidden: !barVisible['hist'],
+  }];
+  for (const yr of years) {
+    datasets.push({
+      label: String(yr),
+      data: monthly[yr].map((v,i) => (yr === nowYr && i >= nowMon) ? null : v),
+      backgroundColor: col(yr).fill + 'bb',
+      borderColor: col(yr).line,
+      borderWidth: 1,
+      hidden: !barVisible[yr],
+    });
+  }
+
+  if (barInst) barInst.destroy();
+  barInst = new Chart(document.getElementById('barC'), {
+    type: 'bar',
+    data: { labels: MON_S, datasets },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { display: false }, tooltip: { mode: 'index', intersect: false, filter: item => !barInst.data.datasets[item.datasetIndex].hidden } },
+      scales: {
+        x: { grid: { color: 'rgba(0,0,0,.05)' }, ticks: { autoSkip: false, font: { size: 11 } } },
+        y: { grid: { color: 'rgba(0,0,0,.05)' }, ticks: { callback: v => v + ' mm', font: { size: 11 } }, beginAtZero: true }
+      }
+    }
+  });
+}
+
+function buildCum(yr, view) {
+  if (view) cumView = view;
+  if (yr) activeYr = yr;
+  document.querySelectorAll('.yr-tab').forEach(t => t.classList.toggle('on', parseInt(t.dataset.yr) === activeYr));
+  document.getElementById('yr-tabs').style.display = cumView === 'single' ? 'flex' : 'none';
+  document.getElementById('btn-single').classList.toggle('on', cumView === 'single');
+  document.getElementById('btn-all').classList.toggle('on', cumView === 'all');
+
+  const histCum = cumArr(HIST_MON);
+  let datasets = [];
+
+  if (cumView === 'single') {
+    const now = new Date();
+    const isCurrentYr = activeYr === now.getFullYear();
+    const cutoff = isCurrentYr ? now.getMonth() + 1 : undefined;
+    const yrCum = weeklyData[activeYr] ? cumMon(weeklyData[activeYr], cutoff) : [];
+    datasets = [
+      { label:'Promedio histórico', data:histCum, borderColor:C.hist.line, backgroundColor:'transparent', borderDash:[5,4], borderWidth:1.5, pointRadius:0, tension:.3 },
+      { label:String(activeYr), data:yrCum, borderColor:col(activeYr).line, backgroundColor:col(activeYr).fill+'33', fill:true, borderWidth:2, pointRadius:2, pointBackgroundColor:col(activeYr).line, tension:.3 },
+    ];
+  } else {
+    datasets = [
+      { label:'Promedio histórico', data:histCum, borderColor:C.hist.line, backgroundColor:'transparent', borderDash:[5,4], borderWidth:1.5, pointRadius:0, tension:.3 },
+    ];
+    const nowYrAll = new Date().getFullYear();
+    const nowMonAll = new Date().getMonth() + 1;
+    Object.keys(weeklyData).map(Number).sort().forEach(y => {
+      const cutoffAll = y === nowYrAll ? nowMonAll : undefined;
+      datasets.push({
+        label: String(y),
+        data: cumMon(weeklyData[y], cutoffAll),
+        borderColor: col(y).line,
+        backgroundColor: 'transparent',
+        borderWidth: 2,
+        pointRadius: 0,
+        tension: .3,
+      });
+    });
+  }
+
+  document.getElementById('cum-leg').innerHTML = datasets.map(d =>
+    `<span style="display:flex;align-items:center;gap:5px"><i style="width:10px;height:10px;border-radius:2px;display:inline-block;background:${d.borderColor}"></i>${d.label}</span>`
+  ).join('');
+
+  if (cumInst) cumInst.destroy();
+  cumInst = new Chart(document.getElementById('cumC'), {
+    type: 'line',
+    data: { labels: MONTHS, datasets },
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { display: false }, tooltip: { mode:'index', intersect:false, callbacks: { label: ctx => `${ctx.dataset.label}: ${ctx.parsed.y.toFixed(0)} mm` } } },
+      scales: {
+        x: { grid: { color: 'rgba(0,0,0,.05)' }, ticks: { font: { size: 11 } } },
+        y: { grid: { color: 'rgba(0,0,0,.05)' }, ticks: { callback: v => v + ' mm', font: { size: 11 } }, beginAtZero: true }
+      }
+    }
+  });
+}
+
+async function init() {
+  try {
+    const res = await fetch(API);
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const data = await res.json();
+    const rows = data.slice(3);
+    const { monthly, weekly } = aggregate(rows);
+    weeklyData = weekly;
+    monthlyData = monthly;
+
+    const now = new Date();
+    const nowYr = now.getFullYear();
+    const nowMon = now.getMonth() + 1;
+    activeYr = nowYr;
+
+    document.getElementById('loading').style.display = 'none';
+    document.getElementById('dash').style.display = 'block';
+
+    buildStats(monthly, nowMon, nowYr);
+
+    const yrs = Object.keys(monthly).map(Number).sort();
+    const tabs = document.getElementById('yr-tabs');
+    yrs.forEach(yr => {
+      const b = document.createElement('button');
+      b.className = 'yr-tab' + (yr === nowYr ? ' on' : '');
+      b.dataset.yr = yr;
+      b.textContent = yr;
+      b.onclick = () => buildCum(yr, 'single');
+      tabs.appendChild(b);
+    });
+
+    document.getElementById('btn-single').onclick = () => buildCum(null, 'single');
+    document.getElementById('btn-all').onclick = () => buildCum(null, 'all');
+
+    setTimeout(() => {
+      buildBar(monthly, nowMon, nowYr);
+      buildCum(nowYr, 'single');
+      window.dispatchEvent(new Event('resize'));
+    }, 800);
+
+    const ts = now.toLocaleDateString('es-MX', { day:'numeric', month:'long', year:'numeric', hour:'2-digit', minute:'2-digit' });
+    document.getElementById('updated').textContent = `Actualizado: ${ts} · Fuente: pluviómetro Caminos de Agua, San Miguel de Allende`;
+  } catch(e) {
+    document.getElementById('loading').style.display = 'none';
+    document.getElementById('err').style.display = 'block';
+    document.getElementById('err').innerHTML = `Error al cargar datos: ${e.message}`;
+  }
+}
+init();
+window.addEventListener('load', () => setTimeout(() => window.dispatchEvent(new Event('resize')), 1200));
+</script>
+</body>
+</html>
