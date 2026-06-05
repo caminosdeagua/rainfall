@@ -107,8 +107,12 @@ function aggregate(rows) {
   return { monthly, weekly };
 }
 
-function cumMon(weekArr) {
-  return WEEK_TO_MON.map(cut => parseFloat(weekArr.slice(0, cut).reduce((a,b) => a+b, 0).toFixed(1)));
+function cumMon(weekArr, cutoffMonth) {
+  // cutoffMonth: 1-12, if provided null out months beyond it
+  return WEEK_TO_MON.map((cut, i) => {
+    if (cutoffMonth !== undefined && i >= cutoffMonth) return null;
+    return parseFloat(weekArr.slice(0, cut).reduce((a,b) => a+b, 0).toFixed(1));
+  });
 }
 function cumArr(arr) {
   let s = 0; return arr.map(v => { s += v; return parseFloat(s.toFixed(1)); });
@@ -225,7 +229,10 @@ function buildCum(yr, view) {
   let datasets = [];
 
   if (cumView === 'single') {
-    const yrCum = weeklyData[activeYr] ? cumMon(weeklyData[activeYr]) : [];
+    const now = new Date();
+    const isCurrentYr = activeYr === now.getFullYear();
+    const cutoff = isCurrentYr ? now.getMonth() + 1 : undefined;
+    const yrCum = weeklyData[activeYr] ? cumMon(weeklyData[activeYr], cutoff) : [];
     datasets = [
       { label:'Historical avg.', data:histCum, borderColor:C.hist.line, backgroundColor:'transparent', borderDash:[5,4], borderWidth:1.5, pointRadius:0, tension:.3 },
       { label:String(activeYr), data:yrCum, borderColor:col(activeYr).line, backgroundColor:col(activeYr).fill+'33', fill:true, borderWidth:2, pointRadius:2, pointBackgroundColor:col(activeYr).line, tension:.3 },
@@ -234,10 +241,13 @@ function buildCum(yr, view) {
     datasets = [
       { label:'Historical avg.', data:histCum, borderColor:C.hist.line, backgroundColor:'transparent', borderDash:[5,4], borderWidth:1.5, pointRadius:0, tension:.3 },
     ];
+    const nowYrAll = new Date().getFullYear();
+    const nowMonAll = new Date().getMonth() + 1;
     Object.keys(weeklyData).map(Number).sort().forEach(y => {
+      const cutoffAll = y === nowYrAll ? nowMonAll : undefined;
       datasets.push({
         label: String(y),
-        data: cumMon(weeklyData[y]),
+        data: cumMon(weeklyData[y], cutoffAll),
         borderColor: col(y).line,
         backgroundColor: 'transparent',
         borderWidth: 2,
