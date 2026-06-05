@@ -17,9 +17,6 @@ h1 { font-size: 18px; font-weight: 500; color: #253489; margin-bottom: 1.5rem; }
 .badge-above { font-size: 10px; padding: 2px 6px; border-radius: 10px; background: #E1F5EE; color: #085041; margin-left: 6px; vertical-align: middle; }
 .badge-below { font-size: 10px; padding: 2px 6px; border-radius: 10px; background: #FAECE7; color: #4A1B0C; margin-left: 6px; vertical-align: middle; }
 .sec-head { font-size: 12px; font-weight: 500; color: #666; text-transform: uppercase; letter-spacing: .05em; margin: 1.5rem 0 .6rem; }
-.legend { display: flex; flex-wrap: wrap; gap: 12px; margin-bottom: 8px; font-size: 12px; color: #555; }
-.legend span { display: flex; align-items: center; gap: 5px; }
-.legend i { width: 10px; height: 10px; border-radius: 2px; display: inline-block; flex-shrink: 0; }
 .yr-tabs { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: .75rem; }
 .yr-tab { background: none; border: 1px solid #ddd; border-radius: 8px; padding: 4px 14px; font-size: 12px; cursor: pointer; color: #555; font-family: inherit; }
 .yr-tab:hover { background: #f0f0ee; }
@@ -28,6 +25,11 @@ h1 { font-size: 18px; font-weight: 500; color: #253489; margin-bottom: 1.5rem; }
 .view-btn { background: none; border: 1px solid #ddd; border-radius: 8px; padding: 4px 14px; font-size: 12px; cursor: pointer; color: #555; font-family: inherit; }
 .view-btn:hover { background: #f0f0ee; }
 .view-btn.on { background: #E6F1FB; border-color: #85B7EB; color: #0C447C; font-weight: 500; }
+/* Checkbox toggles for bar chart */
+.check-row { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 10px; }
+.check-pill { display: flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 20px; border: 1.5px solid #ddd; cursor: pointer; font-size: 12px; color: #555; user-select: none; transition: opacity .15s; }
+.check-pill.off { opacity: .35; }
+.check-pill .dot { width: 10px; height: 10px; border-radius: 2px; flex-shrink: 0; }
 .loading { color: #666; font-size: 14px; padding: 3rem 0; text-align: center; }
 .error { color: #c0392b; font-size: 13px; padding: 2rem 0; text-align: center; line-height: 1.6; }
 .updated { font-size: 11px; color: #aaa; margin-top: 1.25rem; text-align: right; }
@@ -42,6 +44,7 @@ canvas { display: block !important; }
 <div id="dash" style="display:none">
   <div class="stat-grid" id="stats"></div>
 
+  <!-- CUMULATIVE CHART (top) -->
   <div class="sec-head">Cumulative rainfall — year to date</div>
   <div style="display:flex;align-items:center;gap:16px;flex-wrap:wrap;margin-bottom:.75rem">
     <div class="view-toggle">
@@ -50,13 +53,14 @@ canvas { display: block !important; }
     </div>
     <div class="yr-tabs" id="yr-tabs"></div>
   </div>
-  <div class="legend" id="cum-leg"></div>
+  <div class="legend" id="cum-leg" style="display:flex;flex-wrap:wrap;gap:12px;margin-bottom:8px;font-size:12px;color:#555"></div>
   <div id="cum-wrap" style="position:relative;width:100%;height:260px;min-height:260px;overflow:hidden">
     <canvas id="cumC" width="800" height="260" style="width:100%!important;height:260px!important;min-height:260px"></canvas>
   </div>
 
+  <!-- BAR CHART (bottom) with toggles -->
   <div class="sec-head" style="margin-top:1.5rem">Monthly precipitation (mm)</div>
-  <div class="legend" id="bar-leg"></div>
+  <div class="check-row" id="bar-checks"></div>
   <div id="bar-wrap" style="position:relative;width:100%;height:270px;min-height:270px;overflow:hidden">
     <canvas id="barC" width="800" height="270" style="width:100%!important;height:270px!important;min-height:270px"></canvas>
   </div>
@@ -112,6 +116,7 @@ function cumArr(arr) {
 
 let barInst = null, cumInst = null, weeklyData = {}, monthlyData = {};
 let cumView = 'single', activeYr = 2026;
+let barVisible = {}; // tracks which datasets are visible in bar chart
 
 function buildStats(monthly, nowMon, nowYr) {
   const d = monthly[nowYr] || new Array(12).fill(0);
@@ -138,14 +143,49 @@ function buildStats(monthly, nowMon, nowYr) {
     </div>`).join('');
 }
 
+function buildBarChecks(years, nowYr) {
+  const container = document.getElementById('bar-checks');
+  container.innerHTML = '';
+
+  // Default: current year and historical average visible, others off
+  barVisible = { hist: true };
+  years.forEach(yr => { barVisible[yr] = (yr === nowYr); });
+
+  const items = [{ key:'hist', label:'Historical avg.', c:C.hist }, ...years.map(yr => ({ key:yr, label:String(yr), c:col(yr) }))];
+
+  items.forEach(item => {
+    const pill = document.createElement('div');
+    pill.className = 'check-pill' + (barVisible[item.key] ? '' : ' off');
+    pill.innerHTML = `<span class="dot" style="background:${item.c.line}"></span>${item.label}`;
+    pill.onclick = () => {
+      barVisible[item.key] = !barVisible[item.key];
+      pill.classList.toggle('off', !barVisible[item.key]);
+      updateBarVisibility();
+    };
+    container.appendChild(pill);
+  });
+}
+
+function updateBarVisibility() {
+  if (!barInst) return;
+  barInst.data.datasets.forEach((ds, i) => {
+    const key = i === 0 ? 'hist' : parseInt(ds.label);
+    ds.hidden = !barVisible[key];
+  });
+  barInst.update();
+}
+
 function buildBar(monthly, nowMon, nowYr) {
   const years = Object.keys(monthly).map(Number).sort();
+  buildBarChecks(years, nowYr);
+
   const datasets = [{
     label: 'Historical avg.',
     data: HIST_MON,
     backgroundColor: C.hist.fill + '88',
     borderColor: C.hist.line,
     borderWidth: 1,
+    hidden: !barVisible['hist'],
   }];
   for (const yr of years) {
     datasets.push({
@@ -154,18 +194,17 @@ function buildBar(monthly, nowMon, nowYr) {
       backgroundColor: col(yr).fill + 'bb',
       borderColor: col(yr).line,
       borderWidth: 1,
+      hidden: !barVisible[yr],
     });
   }
-  document.getElementById('bar-leg').innerHTML = datasets.map(d =>
-    `<span><i style="background:${d.backgroundColor};border:1px solid ${d.borderColor}"></i>${d.label}</span>`
-  ).join('');
+
   if (barInst) barInst.destroy();
   barInst = new Chart(document.getElementById('barC'), {
     type: 'bar',
     data: { labels: MON_S, datasets },
     options: {
       responsive: true, maintainAspectRatio: false,
-      plugins: { legend: { display: false }, tooltip: { mode: 'index', intersect: false } },
+      plugins: { legend: { display: false }, tooltip: { mode: 'index', intersect: false, filter: item => !barInst.data.datasets[item.datasetIndex].hidden } },
       scales: {
         x: { grid: { color: 'rgba(0,0,0,.05)' }, ticks: { autoSkip: false, font: { size: 11 } } },
         y: { grid: { color: 'rgba(0,0,0,.05)' }, ticks: { callback: v => v + ' mm', font: { size: 11 } }, beginAtZero: true }
@@ -195,8 +234,7 @@ function buildCum(yr, view) {
     datasets = [
       { label:'Historical avg.', data:histCum, borderColor:C.hist.line, backgroundColor:'transparent', borderDash:[5,4], borderWidth:1.5, pointRadius:0, tension:.3 },
     ];
-    const years = Object.keys(weeklyData).map(Number).sort();
-    for (const y of years) {
+    Object.keys(weeklyData).map(Number).sort().forEach(y => {
       datasets.push({
         label: String(y),
         data: cumMon(weeklyData[y]),
@@ -206,11 +244,11 @@ function buildCum(yr, view) {
         pointRadius: 0,
         tension: .3,
       });
-    }
+    });
   }
 
   document.getElementById('cum-leg').innerHTML = datasets.map(d =>
-    `<span><i style="background:${d.borderColor}"></i>${d.label}</span>`
+    `<span style="display:flex;align-items:center;gap:5px"><i style="width:10px;height:10px;border-radius:2px;display:inline-block;background:${d.borderColor}"></i>${d.label}</span>`
   ).join('');
 
   if (cumInst) cumInst.destroy();
