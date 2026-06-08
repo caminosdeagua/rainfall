@@ -30,6 +30,11 @@ h1 { font-size: 18px; font-weight: 500; color: #253489; margin-bottom: 1.5rem; }
 .check-pill { display: flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 20px; border: 1.5px solid #ddd; cursor: pointer; font-size: 12px; color: #555; user-select: none; transition: opacity .15s; }
 .check-pill.off { opacity: .35; }
 .check-pill .dot { width: 10px; height: 10px; border-radius: 2px; flex-shrink: 0; }
+.info-icon { display: inline-flex; align-items: center; justify-content: center; width: 14px; height: 14px; border-radius: 50%; background: #aaa; color: #fff; font-size: 9px; font-weight: bold; cursor: pointer; flex-shrink: 0; line-height: 1; position: relative; }
+.info-icon:hover .info-tip, .info-icon.open .info-tip { display: block; }
+.info-tip { display: none; position: absolute; bottom: calc(100% + 6px); left: 50%; transform: translateX(-50%); background: #fff; border: 1px solid #ddd; border-radius: 6px; padding: 8px 10px; font-size: 11px; color: #444; line-height: 1.5; width: 240px; box-shadow: 0 2px 8px rgba(0,0,0,.12); z-index: 100; pointer-events: auto; white-space: normal; }
+.info-tip a { color: #35abbd; text-decoration: none; }
+.info-tip a:hover { text-decoration: underline; }
 .loading { color: #666; font-size: 14px; padding: 3rem 0; text-align: center; }
 .error { color: #c0392b; font-size: 13px; padding: 2rem 0; text-align: center; line-height: 1.6; }
 .updated { font-size: 11px; color: #aaa; margin-top: 1.25rem; text-align: right; }
@@ -73,8 +78,8 @@ const API = 'https://script.google.com/macros/s/AKfycbzlw2RcgidvpR-yWg4I8hqL9DHm
 
 const MONTHS  = ['January','February','March','April','May','June','July','August','September','October','November','December'];
 const MON_S   = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-const HIST_MON = [14, 12.9, 12.3, 12.9, 41.2, 114.4, 146.3, 103.5, 116.9, 44.2, 16.2, 5];
-const HIST_TOTAL = 639.8;
+const HIST_MON = [13.8, 12.7, 12.2, 12.8, 40.4, 117.1, 143.6, 99.7, 116.7, 41.7, 16.2, 5.0];
+const HIST_TOTAL = 631.9;
 const WEEK_TO_MON = [4,8,13,17,22,26,30,35,39,44,48,53];
 
 const C = {
@@ -138,7 +143,7 @@ function buildStats(monthly, nowMon, nowYr) {
     { l:`${nowYr} total so far`, v:`${ytd.toFixed(0)} mm`, extra:badge, raw:true },
     { l:`${MONTHS[nowMon-1]} ${nowYr}`, v:`${curMon.toFixed(1)} mm`, s:`Monthly avg: ${HIST_MON[nowMon-1]} mm` },
     { l:`${lastFull} total`, v:`${lastTotal.toFixed(0)} mm`, s:`Annual avg: ${HIST_TOTAL} mm` },
-    { l:'Historical average', v:`${HIST_TOTAL} mm`, s:'SMN stations 1990–2019' },
+    { l:'Historical average', v:`${HIST_TOTAL} mm`, s:'SMN stations 1991–2020' },
   ].map(c => `
     <div class="stat-card">
       <div class="stat-label">${c.l}</div>
@@ -160,7 +165,16 @@ function buildBarChecks(years, nowYr) {
   items.forEach(item => {
     const pill = document.createElement('div');
     pill.className = 'check-pill' + (barVisible[item.key] ? '' : ' off');
-    pill.innerHTML = `<span class="dot" style="background:${item.c.line}"></span>${item.label}`;
+    if (item.key === 'hist') {
+      pill.innerHTML = `<span class="dot" style="background:${item.c.line}"></span>${item.label}<span class="info-icon" title="">i<span class="info-tip">30-year average (1991–2020) based on three weather stations near San Miguel de Allende: SMN San Miguel, La Begoña, and Cinco Señores.<br><a href="https://smn.conagua.gob.mx/es/climatologia/informacion-climatologica/normales-climatologicas-por-estado?estado=gto" target="_blank">Source: SMN / CONAGUA normales climatológicas</a></span></span>`;
+      pill.querySelector('.info-icon').addEventListener('click', e => {
+        e.stopPropagation();
+        e.currentTarget.classList.toggle('open');
+      });
+      document.addEventListener('click', () => document.querySelectorAll('.info-icon.open').forEach(el => el.classList.remove('open')));
+    } else {
+      pill.innerHTML = `<span class="dot" style="background:${item.c.line}"></span>${item.label}`;
+    }
     pill.onclick = () => {
       barVisible[item.key] = !barVisible[item.key];
       pill.classList.toggle('off', !barVisible[item.key]);
@@ -257,9 +271,12 @@ function buildCum(yr, view) {
     });
   }
 
-  document.getElementById('cum-leg').innerHTML = datasets.map(d =>
-    `<span style="display:flex;align-items:center;gap:5px"><i style="width:10px;height:10px;border-radius:2px;display:inline-block;background:${d.borderColor}"></i>${d.label}</span>`
-  ).join('');
+  document.getElementById('cum-leg').innerHTML = datasets.map(d => {
+    const infoIcon = d.label === 'Historical avg.'
+      ? `<span class="info-icon" style="margin-left:2px" onclick="event.stopPropagation();this.classList.toggle('open')">i<span class="info-tip">30-year average (1991–2020) based on three weather stations near San Miguel de Allende: SMN San Miguel, La Begoña, and Cinco Señores.<br><a href="https://smn.conagua.gob.mx/es/climatologia/informacion-climatologica/normales-climatologicas-por-estado?estado=gto" target="_blank">Source: SMN / CONAGUA normales climatológicas</a></span></span>`
+      : '';
+    return `<span style="display:flex;align-items:center;gap:5px"><i style="width:10px;height:10px;border-radius:2px;display:inline-block;background:${d.borderColor}"></i>${d.label}${infoIcon}</span>`;
+  }).join('');
 
   if (cumInst) cumInst.destroy();
   cumInst = new Chart(document.getElementById('cumC'), {
